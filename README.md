@@ -63,8 +63,8 @@ See the [Tauri prerequisites documentation](https://v2.tauri.app/start/prerequis
 Clone the repository:
 
 ```bash
-git clone https://github.com/USERNAME/yt-dlp-GUI.git
-cd yt-dlp-GUI
+git clone https://github.com/HeHexa6ty/Tauri-yt-dlp-GUI
+cd tauri-ytdlp-gui
 ```
 
 Install dependencies:
