@@ -1,0 +1,135 @@
+.directory-div {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  text-align: left;
+}
+
+.directory-div__legend {
+  margin-bottom: 8px;
+  padding: 0;
+  font-size: 0.9rem;
+  color: #bbbbbb;
+}
+
+.directory-div__options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.directory-option {
+  position: relative;
+}
+
+.directory-option__input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.directory-option__label {
+  display: inline-block;
+  padding: 8px 20px;
+  border: 1px solid #555555;
+  border-radius: 8px;
+  color: #dddddd;
+  background: transparent;
+  font-size: 0.95rem;
+  cursor: pointer;
+  user-select: none;
+  transition:
+    background-color 0.15s,
+    border-color 0.15s,
+    color 0.15s;
+}
+
+.directory-option:hover .directory-option__label {
+  border-color: #888888;
+}
+
+.directory-option__input:checked + .directory-option__label {
+  border-color: #ffffff;
+  color: #000000;
+  background-color: #ffffff;
+  font-weight: 600;
+}
+
+.directory-option__input:focus-visible + .directory-option__label {
+  outline: 2px solid #396cd8;
+  outline-offset: 2px;
+}
+
+.directory-div:disabled .directory-option__label {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.directory-div__tree {
+  margin: 10px 0 0;
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  background-color: rgba(0, 0, 0, 0.25);
+  color: #bbbbbb;
+  font-family: "JetBrains Mono", "Fira Code", ui-monospace, monospace;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  text-align: left;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.directory-div__path {
+  margin: 10px 0 0;
+  font-size: 0.85rem;
+  color: #999999;
+  overflow-wrap: anywhere;
+  word-break: break-all;
+}
+
+.directory-div__custom {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.directory-div__custom .directory-div__path {
+  flex: 1 1 200px;
+  margin: 0;
+}
+
+.directory-div__path--empty {
+  color: #777777;
+  font-style: italic;
+}
+
+.directory-div__browse {
+  flex: 0 0 auto;
+  padding: 8px 16px;
+  border: 1px solid #555555;
+  border-radius: 8px;
+  color: #dddddd;
+  background-color: transparent;
+  font-family: inherit;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition:
+    background-color 0.15s,
+    border-color 0.15s;
+}
+
+.directory-div__browse:hover:not(:disabled) {
+  border-color: #888888;
+}
+
+.directory-div__browse:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}

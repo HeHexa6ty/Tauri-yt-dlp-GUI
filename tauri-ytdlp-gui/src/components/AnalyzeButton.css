@@ -1,0 +1,30 @@
+.analyze-button {
+  flex: 0 0 auto;
+  padding: 12px 24px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  font-size: 16px;
+  font-weight: 600;
+  font-family: inherit;
+  color: #000000;
+  background-color: #ffffff;
+  cursor: pointer;
+  transition:
+    transform 0.15s,
+    opacity 0.15s,
+    background-color 0.15s;
+}
+
+.analyze-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.analyze-button:active:not(:disabled) {
+  transform: translateY(0);
+  background-color: #e8e8e8;
+}
+
+.analyze-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}

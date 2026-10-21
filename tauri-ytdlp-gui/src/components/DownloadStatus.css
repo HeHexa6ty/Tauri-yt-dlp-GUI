@@ -1,0 +1,85 @@
+.download-status {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.download-status__message {
+  margin: 0;
+  padding: 10px 14px;
+  border: 1px solid rgba(86, 199, 129, 0.5);
+  border-radius: 10px;
+  background-color: rgba(86, 199, 129, 0.12);
+  color: #9be3b8;
+  font-size: 0.9rem;
+  text-align: left;
+  word-break: break-word;
+}
+
+.download-status__error {
+  margin: 0;
+  padding: 10px 14px;
+  border: 1px solid rgba(224, 108, 108, 0.5);
+  border-radius: 10px;
+  background-color: rgba(224, 108, 108, 0.12);
+  color: #f0a3a3;
+  font-size: 0.9rem;
+  text-align: left;
+}
+
+.download-status__conflict {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid rgba(224, 180, 96, 0.55);
+  border-radius: 10px;
+  background-color: rgba(224, 180, 96, 0.12);
+  text-align: left;
+}
+
+.download-status__conflict-text {
+  margin: 0;
+  color: #f0d49a;
+  font-size: 0.9rem;
+  word-break: break-word;
+}
+
+.download-status__actions {
+  display: flex;
+  gap: 10px;
+}
+
+.download-status__button {
+  padding: 8px 18px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  font-family: inherit;
+  color: #000000;
+  background-color: #ffffff;
+  cursor: pointer;
+  transition:
+    opacity 0.15s,
+    background-color 0.15s;
+}
+
+.download-status__button:hover:not(:disabled) {
+  background-color: #e8e8e8;
+}
+
+.download-status__button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.download-status__button--ghost {
+  color: #dddddd;
+  background-color: transparent;
+  border-color: #666666;
+}
+
+.download-status__button--ghost:hover:not(:disabled) {
+  background-color: rgba(255, 255, 255, 0.08);
+}
