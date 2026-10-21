@@ -51,6 +51,8 @@ export interface DownloadRequest {
   /** Title and id come from the earlier analysis and build the file name. */
   title: string;
   id: string;
+  /** Detected source type; photo posts use a different yt-dlp pipeline. */
+  mediaType: MediaType;
   format: OutputFormat;
   /** Only meaningful when `format` is `gif`. */
   gifQuality?: GifQuality;

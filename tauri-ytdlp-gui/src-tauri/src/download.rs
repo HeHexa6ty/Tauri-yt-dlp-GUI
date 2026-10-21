@@ -9,7 +9,8 @@ use tokio::process::Command;
 
 use crate::error::AppError;
 use crate::models::{
-    ConflictMode, DownloadProgress, DownloadRequest, DownloadResult, GifQuality, OutputFormat,
+    ConflictMode, DownloadProgress, DownloadRequest, DownloadResult, GifQuality, MediaType,
+    OutputFormat,
 };
 use crate::paths::{parse_supported_url, resolve_download_dir};
 use crate::ytdlp::{ffmpeg_command, ytdlp_command};
@@ -349,6 +350,48 @@ async fn run_download_temp(
     first_file(temp)
 }
 
+/// Flags for image posts: yt-dlp has no downloadable format for a photo, but
+/// `--write-thumbnail` saves the largest image it extracted.
+fn image_args() -> Vec<String> {
+    vec![
+        "--no-playlist".to_string(),
+        "--no-warnings".to_string(),
+        "--windows-filenames".to_string(),
+        "--newline".to_string(),
+        "--ignore-no-formats-error".to_string(),
+        "--skip-download".to_string(),
+        "--write-thumbnail".to_string(),
+        // Carousels are playlists; keep only the first image.
+        "--playlist-items".to_string(),
+        "1".to_string(),
+        "--progress-template".to_string(),
+        PROGRESS_TEMPLATE.to_string(),
+    ]
+}
+
+/// Downloads the image of a photo post into a scratch folder.
+async fn run_download_temp_image(
+    app: &AppHandle,
+    request: &DownloadRequest,
+    output_base: &str,
+    temp: &Path,
+    id: &str,
+) -> Result<PathBuf, AppError> {
+    let mut command = ytdlp_command();
+    command.args(image_args());
+
+    let template = format!(
+        "{}.%(ext)s",
+        escape_template(&temp.join(output_base).to_string_lossy())
+    );
+    command.arg("-o").arg(template);
+    command.arg(&request.url);
+
+    run_with_progress(app, command, id).await?;
+
+    first_file(temp)
+}
+
 /// Returns the single downloaded file inside a scratch folder.
 fn first_file(directory: &Path) -> Result<PathBuf, AppError> {
     let entries = std::fs::read_dir(directory).map_err(|error| {
@@ -514,38 +557,40 @@ pub async fn download(
         let _ = app.emit(PROGRESS_EVENT, progress);
     };
 
+    // Photo posts have no downloadable format, so their pixels come from the
+    // largest extracted thumbnail instead.
+    let image_source = request.media_type == MediaType::Image;
+
+    let converting = |id: &str| DownloadProgress {
+        id: id.to_string(),
+        stage: "converting".to_string(),
+        percent: 100.0,
+        downloaded_bytes: 0,
+        total_bytes: None,
+        speed: None,
+        eta: None,
+    };
+
     match request.format {
         OutputFormat::Mp4 | OutputFormat::Mp3 => {
             run_download(app, &request, &output_base, &directory, &id).await?;
         }
         OutputFormat::Gif => {
             let temp = make_temp_dir(&id)?;
-            let source = run_download_temp(app, &request, &output_base, &temp, &id).await?;
-            emit(DownloadProgress {
-                id: id.clone(),
-                stage: "converting".to_string(),
-                percent: 100.0,
-                downloaded_bytes: 0,
-                total_bytes: None,
-                speed: None,
-                eta: None,
-            });
+            let source = if image_source {
+                run_download_temp_image(app, &request, &output_base, &temp, &id).await?
+            } else {
+                run_download_temp(app, &request, &output_base, &temp, &id).await?
+            };
+            emit(converting(&id));
             let quality = request.gif_quality.unwrap_or(GifQuality::Better);
             convert_gif(&source, &final_path, quality).await?;
             let _ = std::fs::remove_dir_all(&temp);
         }
         OutputFormat::Png | OutputFormat::Jpg => {
             let temp = make_temp_dir(&id)?;
-            let source = run_download_temp(app, &request, &output_base, &temp, &id).await?;
-            emit(DownloadProgress {
-                id: id.clone(),
-                stage: "converting".to_string(),
-                percent: 100.0,
-                downloaded_bytes: 0,
-                total_bytes: None,
-                speed: None,
-                eta: None,
-            });
+            let source = run_download_temp_image(app, &request, &output_base, &temp, &id).await?;
+            emit(converting(&id));
             convert_image(&source, &final_path, request.format).await?;
             let _ = std::fs::remove_dir_all(&temp);
         }

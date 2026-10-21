@@ -101,6 +101,9 @@ pub struct DownloadRequest {
     /// Title/id come from the earlier analysis and are used for the file name.
     pub title: String,
     pub id: String,
+    /// Detected source type; image posts need the thumbnail pipeline because
+    /// yt-dlp exposes no downloadable format for them.
+    pub media_type: MediaType,
     pub format: OutputFormat,
     pub gif_quality: Option<GifQuality>,
     /// Defaults to `fail` so the frontend can ask the user what to do.

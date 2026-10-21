@@ -157,6 +157,7 @@ function App() {
       url: url.trim(),
       title: media.title,
       id: media.id,
+      mediaType: media.mediaType,
       format,
       // GIF quality only matters for the GIF pipeline.
       gifQuality: format === "gif" ? gifQuality : undefined,

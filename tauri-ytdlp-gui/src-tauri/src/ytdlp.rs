@@ -46,6 +46,10 @@ pub async fn analyze(url: &str) -> Result<MediaInfo, AppError> {
             "--no-playlist",
             "--no-warnings",
             "--skip-download",
+            // Photo posts have no downloadable format but still expose image
+            // thumbnails, so treat "no formats" as success and detect them as
+            // images instead of failing the whole analysis.
+            "--ignore-no-formats-error",
             url,
         ])
         .stdin(Stdio::null())
