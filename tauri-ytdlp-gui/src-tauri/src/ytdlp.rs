@@ -89,6 +89,26 @@ pub async fn analyze(url: &str) -> Result<MediaInfo, AppError> {
     parse_info(&json, url)
 }
 
+/// Shown when a site only serves a post to a logged-in session (for example an
+/// age check on Instagram).
+pub(crate) const ACCOUNT_REQUIRED_MESSAGE: &str =
+    "This content may be age-restricted or private and requires a logged-in account.";
+
+/// Detects the stderr messages sites use when an authenticated session is
+/// required. Instagram reports an age-gated post as an "empty media response"
+/// and points at `--cookies-from-browser`.
+pub(crate) fn requires_account(message: &str) -> bool {
+    let lower = message.to_lowercase();
+
+    lower.contains("empty media response")
+        || lower.contains("cookies-from-browser")
+        || lower.contains("use --cookies")
+        || lower.contains("login required")
+        || lower.contains("login_required")
+        || lower.contains("requires authentication")
+        || lower.contains("authentication required")
+}
+
 /// Turns yt-dlp's stderr into a message the UI can display.
 fn map_ytdlp_error(stderr: &str) -> AppError {
     let line = stderr
@@ -102,6 +122,10 @@ fn map_ytdlp_error(stderr: &str) -> AppError {
         .unwrap_or(line.trim())
         .to_string();
     let lower = message.to_lowercase();
+
+    if requires_account(&message) {
+        return AppError::new("login-required", ACCOUNT_REQUIRED_MESSAGE);
+    }
 
     let code = if lower.contains("unsupported url") {
         "unsupported-url"
@@ -213,4 +237,35 @@ fn parse_info(root: &Value, original_url: &str) -> Result<MediaInfo, AppError> {
             folders: Vec::new(),
         },
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const INSTAGRAM_AGE_GATE: &str = "ERROR: [Instagram] DecrKlojBOb: Instagram sent an empty media response. Check if this post is accessible in your browser without being logged-in. If it is not, then use --cookies-from-browser or --cookies for the authentication.";
+
+    #[test]
+    fn maps_an_instagram_age_gate_to_a_clear_message() {
+        let error = map_ytdlp_error(INSTAGRAM_AGE_GATE);
+
+        assert_eq!(error.code, "login-required");
+        assert_eq!(error.message, ACCOUNT_REQUIRED_MESSAGE);
+    }
+
+    #[test]
+    fn maps_a_login_required_response_to_a_clear_message() {
+        let error = map_ytdlp_error(r#"ERROR: {"message":"login_required"}"#);
+
+        assert_eq!(error.code, "login-required");
+        assert_eq!(error.message, ACCOUNT_REQUIRED_MESSAGE);
+    }
+
+    #[test]
+    fn keeps_unrelated_errors_unchanged() {
+        let error = map_ytdlp_error("ERROR: Unsupported URL: https://example.com");
+
+        assert_eq!(error.code, "unsupported-url");
+        assert_eq!(error.message, "Unsupported URL: https://example.com");
+    }
 }

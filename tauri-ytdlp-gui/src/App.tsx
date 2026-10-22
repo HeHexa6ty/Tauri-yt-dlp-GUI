@@ -173,7 +173,19 @@ function App() {
 
     try {
       const result = await downloadMedia(request);
-      setDownloadMessage(`Saved to ${result.filePath}`);
+      const paths = result.filePaths;
+      if (paths.length <= 1) {
+        setDownloadMessage(`Saved to ${paths[0] ?? "the chosen folder"}`);
+      } else {
+        // Show the folder once instead of listing every carousel item.
+        const first = paths[0];
+        const separator = Math.max(
+          first.lastIndexOf("/"),
+          first.lastIndexOf("\\"),
+        );
+        const folder = separator > 0 ? first.slice(0, separator) : first;
+        setDownloadMessage(`Saved ${paths.length} files to ${folder}`);
+      }
     } catch (caught) {
       const backend = getBackendError(caught);
       if (backend?.code === "file-exists") {

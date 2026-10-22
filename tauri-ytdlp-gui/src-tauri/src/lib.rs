@@ -4,6 +4,7 @@ mod download;
 mod error;
 mod models;
 mod paths;
+mod x_api;
 mod ytdlp;
 
 #[tauri::command]

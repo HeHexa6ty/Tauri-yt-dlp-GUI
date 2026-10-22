@@ -130,6 +130,7 @@ pub struct DownloadProgress {
 #[serde(rename_all = "camelCase")]
 pub struct DownloadResult {
     pub id: String,
-    pub file_path: String,
+    /// One path per downloaded item; carousels produce several files.
+    pub file_paths: Vec<String>,
     pub format: OutputFormat,
 }

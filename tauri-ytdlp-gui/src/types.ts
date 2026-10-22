@@ -78,7 +78,8 @@ export interface DownloadProgress {
 /** Result returned by a successful download. */
 export interface DownloadResult {
   id: string;
-  filePath: string;
+  /** One path per item; carousels produce several files. */
+  filePaths: string[];
   format: OutputFormat;
 }
 

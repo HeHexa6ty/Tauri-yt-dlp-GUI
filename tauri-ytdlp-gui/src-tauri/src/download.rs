@@ -13,7 +13,8 @@ use crate::models::{
     OutputFormat,
 };
 use crate::paths::{parse_supported_url, resolve_download_dir};
-use crate::ytdlp::{ffmpeg_command, ytdlp_command};
+use crate::x_api;
+use crate::ytdlp::{ACCOUNT_REQUIRED_MESSAGE, ffmpeg_command, requires_account, ytdlp_command};
 
 /// Only one download may run at a time; a second request is rejected.
 #[derive(Default)]
@@ -132,6 +133,78 @@ fn parse_progress_line(line: &str, id: &str) -> Option<DownloadProgress> {
     })
 }
 
+/// Builds one file name per item. A single item keeps the plain base name;
+/// multiple items are numbered so a carousel always forms a clear set.
+fn output_names(base: &str, count: usize, suffix: Option<usize>) -> Vec<String> {
+    (0..count.max(1))
+        .map(|index| {
+            let item = if count <= 1 {
+                base.to_string()
+            } else {
+                format!("{base}_{}", index + 1)
+            };
+
+            match suffix {
+                Some(suffix) => format!("{item}_{suffix}"),
+                None => item,
+            }
+        })
+        .collect()
+}
+
+/// Resolves free file names for one or more media items. If any name is taken,
+/// `fail` reports the conflict and `rename` suffixes the whole set so the files
+/// still sort as one group.
+pub fn resolve_outputs(
+    directory: &Path,
+    base: &str,
+    extension: &str,
+    count: usize,
+    conflict: ConflictMode,
+) -> Result<Vec<PathBuf>, AppError> {
+    let count = count.max(1);
+
+    let to_paths = |names: &[String]| -> Vec<PathBuf> {
+        names
+            .iter()
+            .map(|name| directory.join(format!("{name}.{extension}")))
+            .collect()
+    };
+    let is_free = |names: &[String]| -> bool {
+        names
+            .iter()
+            .all(|name| !directory.join(format!("{name}.{extension}")).exists())
+    };
+
+    let plain = output_names(base, count, None);
+    if is_free(&plain) {
+        return Ok(to_paths(&plain));
+    }
+
+    if conflict == ConflictMode::Fail {
+        let existing = plain
+            .iter()
+            .find(|name| directory.join(format!("{name}.{extension}")).exists())
+            .expect("a conflicting name exists");
+        return Err(AppError::new(
+            "file-exists",
+            format!("{existing}.{extension} already exists."),
+        ));
+    }
+
+    for suffix in 1..1000 {
+        let candidate = output_names(base, count, Some(suffix));
+        if is_free(&candidate) {
+            return Ok(to_paths(&candidate));
+        }
+    }
+
+    Err(AppError::new(
+        "file-exists",
+        "Could not find available file names.",
+    ))
+}
+
 /// Finds a free file name, or reports the conflict so the UI can ask the user.
 /// Returns the final path together with the base name (including any suffix).
 pub fn resolve_output(
@@ -140,34 +213,17 @@ pub fn resolve_output(
     extension: &str,
     conflict: ConflictMode,
 ) -> Result<(PathBuf, String), AppError> {
-    let first = directory.join(format!("{base}.{extension}"));
-    if !first.exists() {
-        return Ok((first, base.to_string()));
-    }
+    let path = resolve_outputs(directory, base, extension, 1, conflict)?
+        .into_iter()
+        .next()
+        .ok_or_else(|| AppError::new("file-exists", "Could not find an available file name."))?;
 
-    if conflict == ConflictMode::Fail {
-        let file_name = first
-            .file_name()
-            .map(|name| name.to_string_lossy().to_string())
-            .unwrap_or_else(|| base.to_string());
-        return Err(AppError::new(
-            "file-exists",
-            format!("{file_name} already exists."),
-        ));
-    }
+    let resolved_base = path
+        .file_stem()
+        .map(|stem| stem.to_string_lossy().to_string())
+        .unwrap_or_else(|| base.to_string());
 
-    for index in 1..1000 {
-        let candidate_base = format!("{base}_{index}");
-        let candidate = directory.join(format!("{candidate_base}.{extension}"));
-        if !candidate.exists() {
-            return Ok((candidate, candidate_base));
-        }
-    }
-
-    Err(AppError::new(
-        "file-exists",
-        "Could not find an available file name.",
-    ))
+    Ok((path, resolved_base))
 }
 
 /// Shared yt-dlp arguments: quiet output, no playlists, progress on stdout.
@@ -235,6 +291,10 @@ fn map_ytdlp_stderr(stderr: &str) -> AppError {
         .strip_prefix("ERROR: ")
         .unwrap_or(line.trim())
         .to_string();
+
+    if requires_account(&message) {
+        return AppError::new("login-required", ACCOUNT_REQUIRED_MESSAGE);
+    }
 
     AppError::new("download-failed", message)
 }
@@ -351,7 +411,8 @@ async fn run_download_temp(
 }
 
 /// Flags for image posts: yt-dlp has no downloadable format for a photo, but
-/// `--write-thumbnail` saves the largest image it extracted.
+/// `--write-thumbnail` saves the largest image it extracted. Carousels are
+/// playlists, so every entry produces one thumbnail.
 fn image_args() -> Vec<String> {
     vec![
         "--no-playlist".to_string(),
@@ -361,35 +422,76 @@ fn image_args() -> Vec<String> {
         "--ignore-no-formats-error".to_string(),
         "--skip-download".to_string(),
         "--write-thumbnail".to_string(),
-        // Carousels are playlists; keep only the first image.
-        "--playlist-items".to_string(),
-        "1".to_string(),
         "--progress-template".to_string(),
         PROGRESS_TEMPLATE.to_string(),
     ]
 }
 
-/// Downloads the image of a photo post into a scratch folder.
-async fn run_download_temp_image(
+/// Builds the yt-dlp output template for scratch image downloads. Only the
+/// folder is escaped: escaping `%(autonumber)s` would turn it into a literal
+/// file name and every carousel item would overwrite the previous one.
+fn image_output_template(temp: &Path) -> String {
+    format!(
+        "{}.%(autonumber)s.%(ext)s",
+        escape_template(&temp.join("item").to_string_lossy())
+    )
+}
+
+/// Downloads every image (or thumbnail) of a post into a scratch folder.
+async fn run_download_temp_images(
     app: &AppHandle,
     request: &DownloadRequest,
-    output_base: &str,
     temp: &Path,
     id: &str,
-) -> Result<PathBuf, AppError> {
+) -> Result<Vec<PathBuf>, AppError> {
     let mut command = ytdlp_command();
     command.args(image_args());
 
-    let template = format!(
-        "{}.%(ext)s",
-        escape_template(&temp.join(output_base).to_string_lossy())
-    );
-    command.arg("-o").arg(template);
+    // `autonumber` keeps every carousel item in its own file and in order.
+    command.arg("-o").arg(image_output_template(temp));
     command.arg(&request.url);
 
     run_with_progress(app, command, id).await?;
 
-    first_file(temp)
+    sorted_files(temp)
+}
+
+/// Fetches and downloads every photo of an X post. yt-dlp exposes no format for
+/// photos, so the image URLs come from the post's syndication data and are
+/// fetched as plain direct links.
+async fn run_download_temp_x_photos(
+    app: &AppHandle,
+    url: &str,
+    temp: &Path,
+    id: &str,
+) -> Result<Vec<PathBuf>, AppError> {
+    let photos = x_api::fetch_photos(url).await?;
+    if photos.is_empty() {
+        return Err(AppError::new(
+            "download-failed",
+            "This X post has no photo to download.",
+        ));
+    }
+
+    let mut command = ytdlp_command();
+    command.args([
+        "--no-warnings",
+        "--no-playlist",
+        "--windows-filenames",
+        "--no-overwrites",
+        "--newline",
+        "--progress-template",
+        PROGRESS_TEMPLATE,
+    ]);
+
+    command.arg("-o").arg(image_output_template(temp));
+    for photo in &photos {
+        command.arg(&photo.url);
+    }
+
+    run_with_progress(app, command, id).await?;
+
+    sorted_files(temp)
 }
 
 /// Returns the single downloaded file inside a scratch folder.
@@ -412,6 +514,33 @@ fn first_file(directory: &Path) -> Result<PathBuf, AppError> {
         "download-failed",
         "yt-dlp did not produce a file to convert.",
     ))
+}
+
+/// Returns every downloaded file in a scratch folder, in `autonumber` order.
+fn sorted_files(directory: &Path) -> Result<Vec<PathBuf>, AppError> {
+    let mut files: Vec<PathBuf> = std::fs::read_dir(directory)
+        .map_err(|error| {
+            AppError::new(
+                "download-failed",
+                format!("Could not read {}: {error}", directory.display()),
+            )
+        })?
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.is_file())
+        .collect();
+
+    // `autonumber` is zero-padded, so plain path ordering matches the post order.
+    files.sort();
+
+    if files.is_empty() {
+        return Err(AppError::new(
+            "download-failed",
+            "yt-dlp did not produce a file to convert.",
+        ));
+    }
+
+    Ok(files)
 }
 
 /// Runs FFmpeg and surfaces its last stderr line when it fails.
@@ -526,6 +655,70 @@ fn make_temp_dir(id: &str) -> Result<PathBuf, AppError> {
     Ok(dir)
 }
 
+/// Progress payload shown while FFmpeg works on the downloaded images.
+fn converting_progress(id: &str) -> DownloadProgress {
+    DownloadProgress {
+        id: id.to_string(),
+        stage: "converting".to_string(),
+        percent: 100.0,
+        downloaded_bytes: 0,
+        total_bytes: None,
+        speed: None,
+        eta: None,
+    }
+}
+
+/// Downloads every image of a post, converts each one, then moves the results
+/// into the destination. File conflicts are checked once the real item count is
+/// known, so a carousel is always treated as a single set.
+async fn download_image_set(
+    app: &AppHandle,
+    request: &DownloadRequest,
+    platform: &str,
+    directory: &Path,
+    base: &str,
+    id: &str,
+    conflict: ConflictMode,
+    gif_quality: GifQuality,
+) -> Result<Vec<PathBuf>, AppError> {
+    let temp = make_temp_dir(id)?;
+
+    let outcome = async {
+        // X photos are hidden from yt-dlp, so they come from the post's
+        // syndication data; Instagram and other posts use thumbnails.
+        let sources = if platform == "X" {
+            run_download_temp_x_photos(app, &request.url, &temp, id).await?
+        } else {
+            run_download_temp_images(app, request, &temp, id).await?
+        };
+
+        let extension = request.format.extension();
+        let paths = resolve_outputs(directory, base, extension, sources.len(), conflict)?;
+        let _ = app.emit(PROGRESS_EVENT, converting_progress(id));
+
+        for (index, source) in sources.iter().enumerate() {
+            let converted = temp.join(format!("converted_{index}.{extension}"));
+            match request.format {
+                OutputFormat::Gif => convert_gif(source, &converted, gif_quality).await?,
+                _ => convert_image(source, &converted, request.format).await?,
+            }
+
+            std::fs::copy(&converted, &paths[index]).map_err(|error| {
+                AppError::new(
+                    "download-failed",
+                    format!("Could not save {}: {error}", paths[index].display()),
+                )
+            })?;
+        }
+
+        Ok(paths)
+    }
+    .await;
+
+    let _ = std::fs::remove_dir_all(&temp);
+    outcome
+}
+
 /// Full download pipeline: resolve the target, download, convert, report.
 pub async fn download(
     app: &AppHandle,
@@ -549,56 +742,65 @@ pub async fn download(
         sanitize_filename(&request.id)
     );
     let conflict = request.conflict.unwrap_or(ConflictMode::Fail);
-    let (final_path, output_base) =
-        resolve_output(&directory, &base, request.format.extension(), conflict)?;
 
     let id = timestamp_id();
-    let emit = |progress: DownloadProgress| {
-        let _ = app.emit(PROGRESS_EVENT, progress);
-    };
 
-    // Photo posts have no downloadable format, so their pixels come from the
-    // largest extracted thumbnail instead.
+    // Photo posts have no downloadable format, so their pixels come from
+    // thumbnails (other platforms) or the post's syndication data (X).
     let image_source = request.media_type == MediaType::Image;
 
-    let converting = |id: &str| DownloadProgress {
-        id: id.to_string(),
-        stage: "converting".to_string(),
-        percent: 100.0,
-        downloaded_bytes: 0,
-        total_bytes: None,
-        speed: None,
-        eta: None,
-    };
-
-    match request.format {
+    let paths = match request.format {
         OutputFormat::Mp4 | OutputFormat::Mp3 => {
+            let (final_path, output_base) =
+                resolve_output(&directory, &base, request.format.extension(), conflict)?;
             run_download(app, &request, &output_base, &directory, &id).await?;
+            vec![final_path]
+        }
+        OutputFormat::Png | OutputFormat::Jpg => {
+            download_image_set(
+                app,
+                &request,
+                platform,
+                &directory,
+                &base,
+                &id,
+                conflict,
+                GifQuality::Better,
+            )
+            .await?
+        }
+        OutputFormat::Gif if image_source => {
+            download_image_set(
+                app,
+                &request,
+                platform,
+                &directory,
+                &base,
+                &id,
+                conflict,
+                request.gif_quality.unwrap_or(GifQuality::Better),
+            )
+            .await?
         }
         OutputFormat::Gif => {
+            let (final_path, output_base) =
+                resolve_output(&directory, &base, request.format.extension(), conflict)?;
             let temp = make_temp_dir(&id)?;
-            let source = if image_source {
-                run_download_temp_image(app, &request, &output_base, &temp, &id).await?
-            } else {
-                run_download_temp(app, &request, &output_base, &temp, &id).await?
-            };
-            emit(converting(&id));
+            let source = run_download_temp(app, &request, &output_base, &temp, &id).await?;
+            let _ = app.emit(PROGRESS_EVENT, converting_progress(&id));
             let quality = request.gif_quality.unwrap_or(GifQuality::Better);
             convert_gif(&source, &final_path, quality).await?;
             let _ = std::fs::remove_dir_all(&temp);
+            vec![final_path]
         }
-        OutputFormat::Png | OutputFormat::Jpg => {
-            let temp = make_temp_dir(&id)?;
-            let source = run_download_temp_image(app, &request, &output_base, &temp, &id).await?;
-            emit(converting(&id));
-            convert_image(&source, &final_path, request.format).await?;
-            let _ = std::fs::remove_dir_all(&temp);
-        }
-    }
+    };
 
     Ok(DownloadResult {
         id,
-        file_path: final_path.to_string_lossy().to_string(),
+        file_paths: paths
+            .iter()
+            .map(|path| path.to_string_lossy().to_string())
+            .collect(),
         format: request.format,
     })
 }
@@ -687,5 +889,65 @@ mod tests {
         assert_eq!(second_base, "clip [id]_2");
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn image_template_keeps_the_ytdlp_placeholders() {
+        let template = image_output_template(Path::new("/tmp/yt-dlp-gui/1"));
+        assert_eq!(template, "/tmp/yt-dlp-gui/1/item.%(autonumber)s.%(ext)s");
+    }
+
+    #[test]
+    fn image_template_escapes_percent_signs_in_the_folder() {
+        let template = image_output_template(Path::new("/tmp/100%/1"));
+        assert_eq!(template, "/tmp/100%%/1/item.%(autonumber)s.%(ext)s");
+    }
+
+    #[test]
+    fn resolves_one_numbered_name_per_carousel_item() {
+        let dir = std::env::temp_dir().join(format!("yt-dlp-gui-test-{}", timestamp_id()));
+        std::fs::create_dir_all(&dir).expect("temp dir should be created");
+
+        let paths =
+            resolve_outputs(&dir, "post [id]", "jpg", 3, ConflictMode::Fail).expect("free names");
+        assert_eq!(
+            paths,
+            vec![
+                dir.join("post [id]_1.jpg"),
+                dir.join("post [id]_2.jpg"),
+                dir.join("post [id]_3.jpg"),
+            ]
+        );
+
+        // Any existing item makes `fail` report the set as conflicting.
+        std::fs::write(&paths[1], b"x").expect("write target file");
+        let error = resolve_outputs(&dir, "post [id]", "jpg", 3, ConflictMode::Fail)
+            .expect_err("conflict should be reported");
+        assert_eq!(error.code, "file-exists");
+
+        // `rename` suffixes the whole set so it still looks like one group.
+        let renamed =
+            resolve_outputs(&dir, "post [id]", "jpg", 3, ConflictMode::Rename).expect("free names");
+        assert_eq!(
+            renamed,
+            vec![
+                dir.join("post [id]_1_1.jpg"),
+                dir.join("post [id]_2_1.jpg"),
+                dir.join("post [id]_3_1.jpg"),
+            ]
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn maps_an_instagram_age_gate_to_a_clear_message() {
+        let error = map_ytdlp_stderr(
+            "ERROR: [Instagram] DecrKlojBOb: Instagram sent an empty media response. \
+             Check if this post is accessible in your browser without being logged-in.",
+        );
+
+        assert_eq!(error.code, "login-required");
+        assert_eq!(error.message, ACCOUNT_REQUIRED_MESSAGE);
     }
 }
