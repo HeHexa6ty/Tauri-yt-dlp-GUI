@@ -113,19 +113,25 @@ All media processing is intended to run locally, without requiring a dedicated d
 
 ## Development Roadmap
 
-- [ ] Set up Tauri 2 with React and TypeScript
-- [ ] Design the main application interface
-- [ ] Integrate yt-dlp with the Rust backend
-- [ ] Implement URL analysis and media metadata retrieval
-- [ ] Implement video and audio downloading
-- [ ] Add quality and format selection
-- [ ] Integrate FFmpeg for media conversion
-- [ ] Implement download progress tracking
-- [ ] Add download queue management
-- [ ] Implement application settings
+- [X] Set up Tauri 2 with React and TypeScript
+- [X] Design the main application interface
+- [X] Integrate yt-dlp with the Rust backend
+- [X] Implement URL analysis and media metadata retrieval
+- [X] Implement video and audio downloading
+- [X] Add quality and format selection
+- [X] Integrate FFmpeg for media conversion
+- [X] Implement download progress tracking
+- [ ] ~~Add download queue management~~
+- [X] Implement application settings
 - [ ] Package the application for Linux
 - [ ] Add Windows support
 - [ ] Investigate Android support
+
+### Possible features in future
+
+- [ ] Let user choose the name for the file (useless since user can do it himself, but some might find it usefull)
+- [ ] Implement more settings (max size, custom resolution 16x9 16x10 1x1 4x3)
+
 
 ## Disclaimer
 
