@@ -13,8 +13,12 @@
     "windows": [
       {
         "title": "tauri-ytdlp-gui",
-        "width": 800,
-        "height": 600
+        "width": 600,
+        "height": 750,
+        "minWidth": 500,
+        "minHeight": 650,
+        "resizable": true,
+        "center": true
       }
     ],
     "security": {
